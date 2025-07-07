@@ -1,10 +1,14 @@
 import 'dart:io';
+import 'dart:convert';
+// import 'dart:js_interop';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:whisper_ggml/whisper_ggml.dart';
 import 'package:record/record.dart';
+import 'package:http/http.dart' as http;
 
 class Quiz {
   final List<QuestionAndAnswers> questionsAndAnswers;
@@ -47,6 +51,60 @@ const List<Quiz> quizzes = [
     ],
   ),
 ];
+
+/*
+curl -X POST https://openrouter.ai/api/v1/completions \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{
+  "model": "model",
+  "prompt": "prompt"
+}'
+*/
+
+Future<List<bool>> getChecks({
+  required String answerText,
+  required List<String> answers,
+}) async {
+  await dotenv.load(fileName: ".env");
+  String openrouterApiKey = dotenv.env["OPENROUTER_API_KEY"] ?? '';
+  String prompt =
+      """
+  Return a JSON object that maps each answer to a boolean indicating whether it was mentioned in the text.
+  answers: $answers
+  text: $answerText
+  """;
+  final response = await http.post(
+    Uri.parse("https://openrouter.ai/api/v1/chat/completions"),
+    headers: {
+      "Authorization": "Bearer $openrouterApiKey",
+      "Content-Type": "application/json",
+    },
+    body: json.encode({
+      "model": "openai/gpt-4o", // "anthropic/claude-sonnet-4",
+      "messages": [
+        {"role": "user", "content": prompt},
+      ],
+      // "prompt": 'Return a list of 5 fruits',
+      "response_format": {"type": "json_object"},
+    }),
+  );
+  if (response.statusCode == 200 || response.statusCode == 201) {
+    String jsonString = jsonDecode(
+      response.body,
+    )["choices"][0]["message"]["content"];
+    print(jsonString);
+    dynamic jsonResult = jsonDecode(jsonString);
+    List<bool> checks = [];
+    for (final entry in jsonResult.entries) {
+      checks.add(entry.value);
+    }
+    return checks;
+  } else {
+    throw Exception('Failed to post data: ${response.statusCode}');
+  }
+}
+
 void main() {
   runApp(const MyApp());
 }
@@ -153,19 +211,39 @@ class AnswersPage extends StatefulWidget {
 }
 
 class _AnswersPageState extends State<AnswersPage> {
-  late List<bool> checks;
+  late Future<List<bool>> checksFuture;
 
   @override
   void initState() {
     super.initState();
-    checks = List.filled(widget.answers.length, false);
+    if (widget.answerText.isEmpty) {
+      checksFuture = Future.value(List.filled(widget.answers.length, false));
+    } else {
+      checksFuture = getChecks(
+        answerText: widget.answerText,
+        answers: widget.answers,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return QuizPageLayout(
-      inFrame: AnswersSubPage(answers: widget.answers, checks: checks),
-      belowFrame: ContinueButton(showNextQuestion: widget.showNextQuestion),
+    return FutureBuilder(
+      future: checksFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text("Error: ${snapshot.error}"));
+        }
+        List<bool> checks =
+            snapshot.data ?? List.filled(widget.answers.length, false);
+        return QuizPageLayout(
+          inFrame: AnswersSubPage(answers: widget.answers, checks: checks),
+          belowFrame: ContinueButton(showNextQuestion: widget.showNextQuestion),
+        );
+      },
     );
   }
 }
@@ -323,6 +401,7 @@ class _QuestionPageState extends State<QuestionPage> {
             setState(() {
               transcribedText = result!.transcription.text;
             });
+            widget.onAnswerTextChanged(transcribedText);
           }
         } else {
           debugPrint('No recording exists.');
@@ -369,7 +448,6 @@ class _QuestionPageState extends State<QuestionPage> {
       setState(() {
         transcribedText = result!.transcription.text;
       });
-      widget.onAnswerTextChanged(transcribedText);
     }
   }
 }
