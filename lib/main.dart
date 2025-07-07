@@ -52,16 +52,6 @@ const List<Quiz> quizzes = [
   ),
 ];
 
-/*
-curl -X POST https://openrouter.ai/api/v1/completions \
-     -H "Authorization: Bearer <token>" \
-     -H "Content-Type: application/json" \
-     -d '{
-  "model": "model",
-  "prompt": "prompt"
-}'
-*/
-
 Future<List<bool>> getChecks({
   required String answerText,
   required List<String> answers,
@@ -321,7 +311,7 @@ class QuestionPage extends StatefulWidget {
 }
 
 class _QuestionPageState extends State<QuestionPage> {
-  final model = WhisperModel.base;
+  final model = WhisperModel.mediumEn;
   final AudioRecorder audioRecorder = AudioRecorder();
   final WhisperController whisperController = WhisperController();
   String transcribedText = '';
@@ -555,20 +545,56 @@ class CheckButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = theme.textTheme.labelLarge!.copyWith(
-      color: theme.colorScheme.secondary,
-    );
     final String buttonText = isVoiceFinished ? "Check" : "Check without voice";
-    return OutlinedButton(
-      onPressed: () => {showAnswers()},
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Text(
-          buttonText,
-          style: style,
-          // textScaler: TextScaler.linear(1.2)
+
+    return Row(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0),
+            child: Container(
+              decoration: isVoiceFinished
+                  ? BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.green[100]!, // Very light green at top
+                          Colors.green[400]!, // Darker green at bottom
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(
+                        20,
+                      ), // Match button radius
+                    )
+                  : null,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isVoiceFinished
+                      ? Colors
+                            .transparent // Transparent to show gradient
+                      : Colors.grey[900], // Dark grey when not finished
+                  elevation: 0,
+                  shadowColor: Colors.transparent, // Remove shadow completely
+                ),
+                onPressed: () => {showAnswers()},
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                  child: Text(
+                    buttonText,
+                    style: theme.textTheme.labelLarge!.copyWith(
+                      color: isVoiceFinished
+                          ? Colors
+                                .white // White text when finished
+                          : Colors.grey[500], // Light grey when not finished
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 }
