@@ -194,8 +194,7 @@ class QuizPage extends StatefulWidget {
   State<QuizPage> createState() => _QuizPageState();
 }
 
-class _QuizPageState extends State<QuizPage>
-    with SingleTickerProviderStateMixin {
+class _QuizPageState extends State<QuizPage> {
   final model = WhisperModel.base;
   final AudioRecorder audioRecorder = AudioRecorder();
   final WhisperController whisperController = WhisperController();
@@ -206,20 +205,11 @@ class _QuizPageState extends State<QuizPage>
 
   late Future<List<bool>> checksFuture;
   List<bool>? checks;
-  late AnimationController _animationController;
-  late Animation<double> _borderAnimation;
 
   @override
   void initState() {
     super.initState();
     initModel();
-    _animationController = AnimationController(
-      duration: const Duration(milliseconds: 500),
-      vsync: this,
-    );
-    _borderAnimation = Tween<double>(begin: 4.0, end: 8.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
-    );
   }
 
   @override
@@ -241,7 +231,6 @@ class _QuizPageState extends State<QuizPage>
       setState(() {
         checks = List.filled(widget.answers.length, false);
       });
-      _animationController.forward();
     } else {
       checksFuture = getChecks(
         answerText: widget.answerText,
@@ -252,8 +241,15 @@ class _QuizPageState extends State<QuizPage>
           setState(() {
             checks = result;
           });
-          _animationController.forward();
         }
+      });
+    }
+  }
+
+  void _toggleCheck(int index) {
+    if (checks != null) {
+      setState(() {
+        checks![index] = !checks![index];
       });
     }
   }
@@ -278,24 +274,13 @@ class _QuizPageState extends State<QuizPage>
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
-                child: AnimatedBuilder(
-                  animation: _borderAnimation,
-                  builder: (context, child) {
-                    return Container(
-                      width: double.infinity,
-                      clipBehavior: Clip.antiAlias,
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: borderColor,
-                          width: widget.showingAnswers && checks != null
-                              ? _borderAnimation.value
-                              : 4.0,
-                        ),
-                        borderRadius: BorderRadius.circular(50.0),
-                      ),
-                      child: child,
-                    );
-                  },
+                child: Container(
+                  width: double.infinity,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: borderColor, width: 6.0),
+                    borderRadius: BorderRadius.circular(50.0),
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.all(20.0),
                     child: Column(
@@ -317,6 +302,7 @@ class _QuizPageState extends State<QuizPage>
                                     : AnswersList(
                                         answers: widget.answers,
                                         checks: checks!,
+                                        onToggleCheck: _toggleCheck,
                                       ))
                               : Column(
                                   children: [
@@ -362,7 +348,6 @@ class _QuizPageState extends State<QuizPage>
 
   @override
   void dispose() {
-    _animationController.dispose();
     super.dispose();
   }
 
@@ -436,10 +421,16 @@ class _QuizPageState extends State<QuizPage>
 }
 
 class AnswersList extends StatelessWidget {
-  const AnswersList({super.key, required this.answers, required this.checks});
+  const AnswersList({
+    super.key,
+    required this.answers,
+    required this.checks,
+    required this.onToggleCheck,
+  });
 
   final List<String> answers;
   final List<bool> checks;
+  final void Function(int) onToggleCheck;
 
   @override
   Widget build(BuildContext context) {
@@ -461,7 +452,9 @@ class AnswersList extends StatelessWidget {
           child: CheckboxListTile(
             title: Text(answers[index]),
             value: checks[index],
-            onChanged: null, // Disabled
+            onChanged: (bool? value) {
+              onToggleCheck(index);
+            },
             activeColor: isCorrect ? Colors.green : Colors.red,
             checkColor: Colors.white,
             tileColor: backgroundColor,
@@ -515,8 +508,7 @@ class ActionButton extends StatelessWidget {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12.0),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 500),
+            child: Container(
               decoration: BoxDecoration(
                 gradient:
                     (showingAnswers && checks != null) ||
