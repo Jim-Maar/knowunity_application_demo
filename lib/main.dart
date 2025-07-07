@@ -83,7 +83,7 @@ class _QuizPageState extends State<QuizPage> {
   String page = "question";
   String answerText = "";
 
-  void _updateAnsweredText(String newAnswerText) {
+  void _updateAnswerText(String newAnswerText) {
     setState(() {
       answerText = newAnswerText;
     });
@@ -119,11 +119,16 @@ class _QuizPageState extends State<QuizPage> {
         return QuestionPage(
           question:
               widget.quiz.questionsAndAnswers[questionsAndAnswersIdx].question,
-          onAnsweredTextChanged: _updateAnsweredText,
+          onAnswerTextChanged: _updateAnswerText,
           showAnswers: _showAnswers,
         );
       case "answers":
-        return Placeholder();
+        return AnswersPage(
+          answers:
+              widget.quiz.questionsAndAnswers[questionsAndAnswersIdx].answers,
+          answerText: answerText,
+          showNextQuestion: _showNextQuestion,
+        );
       case "result":
         return Placeholder();
       default:
@@ -132,15 +137,106 @@ class _QuizPageState extends State<QuizPage> {
   }
 }
 
+class AnswersPage extends StatefulWidget {
+  const AnswersPage({
+    super.key,
+    required this.answers,
+    required this.answerText,
+    required this.showNextQuestion,
+  });
+  final List<String> answers;
+  final String answerText;
+  final void Function() showNextQuestion;
+
+  @override
+  State<AnswersPage> createState() => _AnswersPageState();
+}
+
+class _AnswersPageState extends State<AnswersPage> {
+  late List<bool> checks;
+
+  @override
+  void initState() {
+    super.initState();
+    checks = List.filled(widget.answers.length, false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return QuizPageLayout(
+      inFrame: AnswersSubPage(answers: widget.answers, checks: checks),
+      belowFrame: ContinueButton(showNextQuestion: widget.showNextQuestion),
+    );
+  }
+}
+
+class AnswersSubPage extends StatefulWidget {
+  const AnswersSubPage({
+    super.key,
+    required this.answers,
+    required this.checks,
+  });
+  final List<String> answers;
+  final List<bool> checks;
+
+  @override
+  State<AnswersSubPage> createState() => _AnswersSubPageState();
+}
+
+class _AnswersSubPageState extends State<AnswersSubPage> {
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: [
+        for (final (i, answer) in widget.answers.indexed)
+          CheckboxListTile(
+            title: Text(answer),
+            value: widget.checks[i],
+            onChanged: (bool? value) {
+              setState(() {
+                widget.checks[i] = value ?? false;
+              });
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class ContinueButton extends StatelessWidget {
+  const ContinueButton({super.key, required this.showNextQuestion});
+  final void Function() showNextQuestion;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.labelLarge!.copyWith(
+      color: theme.colorScheme.secondary,
+    );
+    final String buttonText = "Continue";
+    return OutlinedButton(
+      onPressed: () => {showNextQuestion()},
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Text(
+          buttonText,
+          style: style,
+          // textScaler: TextScaler.linear(1.2)
+        ),
+      ),
+    );
+  }
+}
+
 class QuestionPage extends StatefulWidget {
   const QuestionPage({
     super.key,
     required this.question,
-    required this.onAnsweredTextChanged,
+    required this.onAnswerTextChanged,
     required this.showAnswers,
   });
   final String question;
-  final void Function(String) onAnsweredTextChanged;
+  final void Function(String) onAnswerTextChanged;
   final void Function() showAnswers;
   @override
   State<QuestionPage> createState() => _QuestionPageState();
@@ -273,7 +369,7 @@ class _QuestionPageState extends State<QuestionPage> {
       setState(() {
         transcribedText = result!.transcription.text;
       });
-      widget.onAnsweredTextChanged(transcribedText);
+      widget.onAnswerTextChanged(transcribedText);
     }
   }
 }
@@ -420,13 +516,13 @@ class VoiceButton extends StatelessWidget {
       backgroundColor: theme.colorScheme.inversePrimary,
     );
     return GestureDetector(
-      onTapDown: (details) async {
+      onLongPressStart: (details) async {
         await recordFunc();
       },
-      onTapUp: (details) async {
+      onLongPressEnd: (details) async {
         await recordFunc();
       },
-      onTapCancel: () async {
+      onLongPressCancel: () async {
         await recordFunc();
       },
       child: Container(
