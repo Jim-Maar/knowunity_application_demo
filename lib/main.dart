@@ -81,11 +81,11 @@ class QuizPage extends StatefulWidget {
 class _QuizPageState extends State<QuizPage> {
   int questionsAndAnswersIdx = 0;
   String page = "question";
-  String transcribedText = "";
+  String answerText = "";
 
-  void _updateTranscribedText(String newTranscribedText) {
+  void _updateAnsweredText(String newAnswerText) {
     setState(() {
-      transcribedText = newTranscribedText;
+      answerText = newAnswerText;
     });
   }
 
@@ -119,7 +119,7 @@ class _QuizPageState extends State<QuizPage> {
         return QuestionPage(
           question:
               widget.quiz.questionsAndAnswers[questionsAndAnswersIdx].question,
-          onTranscribedTextChanged: _updateTranscribedText,
+          onAnsweredTextChanged: _updateAnsweredText,
           showAnswers: _showAnswers,
         );
       case "answers":
@@ -136,11 +136,11 @@ class QuestionPage extends StatefulWidget {
   const QuestionPage({
     super.key,
     required this.question,
-    required this.onTranscribedTextChanged,
+    required this.onAnsweredTextChanged,
     required this.showAnswers,
   });
   final String question;
-  final void Function(String) onTranscribedTextChanged;
+  final void Function(String) onAnsweredTextChanged;
   final void Function() showAnswers;
   @override
   State<QuestionPage> createState() => _QuestionPageState();
@@ -273,7 +273,7 @@ class _QuestionPageState extends State<QuestionPage> {
       setState(() {
         transcribedText = result!.transcription.text;
       });
-      widget.onTranscribedTextChanged(transcribedText);
+      widget.onAnsweredTextChanged(transcribedText);
     }
   }
 }
