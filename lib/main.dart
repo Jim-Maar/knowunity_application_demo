@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:convert';
-// import 'dart:js_interop';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -71,11 +70,10 @@ Future<List<bool>> getChecks({
       "Content-Type": "application/json",
     },
     body: json.encode({
-      "model": "openai/gpt-4o", // "anthropic/claude-sonnet-4",
+      "model": "openai/gpt-4o",
       "messages": [
         {"role": "user", "content": prompt},
       ],
-      // "prompt": 'Return a list of 5 fruits',
       "response_format": {"type": "json_object"},
     }),
   );
@@ -113,22 +111,22 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: QuizPage(quiz: quizzes[0]),
+      home: QuizScreen(quiz: quizzes[0]),
     );
   }
 }
 
-class QuizPage extends StatefulWidget {
-  const QuizPage({super.key, required this.quiz});
+class QuizScreen extends StatefulWidget {
+  const QuizScreen({super.key, required this.quiz});
   final Quiz quiz;
 
   @override
-  State<QuizPage> createState() => _QuizPageState();
+  State<QuizScreen> createState() => _QuizScreenState();
 }
 
-class _QuizPageState extends State<QuizPage> {
+class _QuizScreenState extends State<QuizScreen> {
   int questionsAndAnswersIdx = 0;
-  String page = "question";
+  bool showingAnswers = false;
   String answerText = "";
 
   void _updateAnswerText(String newAnswerText) {
@@ -137,181 +135,68 @@ class _QuizPageState extends State<QuizPage> {
     });
   }
 
-  void _showAnswers() {
+  void _toggleShowAnswers() {
     setState(() {
-      page = "answers";
+      showingAnswers = !showingAnswers;
     });
   }
 
   void _showNextQuestion() {
     setState(() {
       if (questionsAndAnswersIdx < widget.quiz.questionsAndAnswers.length - 1) {
-        setState(() {
-          questionsAndAnswersIdx = questionsAndAnswersIdx + 1;
-          page = "question";
-        });
+        questionsAndAnswersIdx = questionsAndAnswersIdx + 1;
+        showingAnswers = false;
+        answerText = "";
       } else {
-        setState(() {
-          page = "result";
-        });
+        // Navigate to result page or handle quiz completion
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final QuestionAndAnswers =
+    final currentQuestionAndAnswers =
         widget.quiz.questionsAndAnswers[questionsAndAnswersIdx];
-    switch (page) {
-      case "question":
-        return QuestionPage(
-          question:
-              widget.quiz.questionsAndAnswers[questionsAndAnswersIdx].question,
-          onAnswerTextChanged: _updateAnswerText,
-          showAnswers: _showAnswers,
-        );
-      case "answers":
-        return AnswersPage(
-          answers:
-              widget.quiz.questionsAndAnswers[questionsAndAnswersIdx].answers,
-          answerText: answerText,
-          showNextQuestion: _showNextQuestion,
-        );
-      case "result":
-        return Placeholder();
-      default:
-        throw ("page does not exist");
-    }
-  }
-}
 
-class AnswersPage extends StatefulWidget {
-  const AnswersPage({
-    super.key,
-    required this.answers,
-    required this.answerText,
-    required this.showNextQuestion,
-  });
-  final List<String> answers;
-  final String answerText;
-  final void Function() showNextQuestion;
-
-  @override
-  State<AnswersPage> createState() => _AnswersPageState();
-}
-
-class _AnswersPageState extends State<AnswersPage> {
-  late Future<List<bool>> checksFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.answerText.isEmpty) {
-      checksFuture = Future.value(List.filled(widget.answers.length, false));
-    } else {
-      checksFuture = getChecks(
-        answerText: widget.answerText,
-        answers: widget.answers,
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: checksFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(child: Text("Error: ${snapshot.error}"));
-        }
-        List<bool> checks =
-            snapshot.data ?? List.filled(widget.answers.length, false);
-        return QuizPageLayout(
-          inFrame: AnswersSubPage(answers: widget.answers, checks: checks),
-          belowFrame: ContinueButton(showNextQuestion: widget.showNextQuestion),
-        );
-      },
+    return QuizPage(
+      question: currentQuestionAndAnswers.question,
+      answers: currentQuestionAndAnswers.answers,
+      answerText: answerText,
+      showingAnswers: showingAnswers,
+      onAnswerTextChanged: _updateAnswerText,
+      toggleShowAnswers: _toggleShowAnswers,
+      showNextQuestion: _showNextQuestion,
     );
   }
 }
 
-class AnswersSubPage extends StatefulWidget {
-  const AnswersSubPage({
-    super.key,
-    required this.answers,
-    required this.checks,
-  });
-  final List<String> answers;
-  final List<bool> checks;
-
-  @override
-  State<AnswersSubPage> createState() => _AnswersSubPageState();
-}
-
-class _AnswersSubPageState extends State<AnswersSubPage> {
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        for (final (i, answer) in widget.answers.indexed)
-          CheckboxListTile(
-            title: Text(answer),
-            value: widget.checks[i],
-            onChanged: (bool? value) {
-              setState(() {
-                widget.checks[i] = value ?? false;
-              });
-            },
-          ),
-      ],
-    );
-  }
-}
-
-class ContinueButton extends StatelessWidget {
-  const ContinueButton({super.key, required this.showNextQuestion});
-  final void Function() showNextQuestion;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final style = theme.textTheme.labelLarge!.copyWith(
-      color: theme.colorScheme.secondary,
-    );
-    final String buttonText = "Continue";
-    return OutlinedButton(
-      onPressed: () => {showNextQuestion()},
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Text(
-          buttonText,
-          style: style,
-          // textScaler: TextScaler.linear(1.2)
-        ),
-      ),
-    );
-  }
-}
-
-class QuestionPage extends StatefulWidget {
-  const QuestionPage({
+class QuizPage extends StatefulWidget {
+  const QuizPage({
     super.key,
     required this.question,
+    required this.answers,
+    required this.answerText,
+    required this.showingAnswers,
     required this.onAnswerTextChanged,
-    required this.showAnswers,
+    required this.toggleShowAnswers,
+    required this.showNextQuestion,
   });
+
   final String question;
+  final List<String> answers;
+  final String answerText;
+  final bool showingAnswers;
   final void Function(String) onAnswerTextChanged;
-  final void Function() showAnswers;
+  final void Function() toggleShowAnswers;
+  final void Function() showNextQuestion;
+
   @override
-  State<QuestionPage> createState() => _QuestionPageState();
+  State<QuizPage> createState() => _QuizPageState();
 }
 
-class _QuestionPageState extends State<QuestionPage> {
-  final model = WhisperModel.mediumEn;
+class _QuizPageState extends State<QuizPage>
+    with SingleTickerProviderStateMixin {
+  final model = WhisperModel.base;
   final AudioRecorder audioRecorder = AudioRecorder();
   final WhisperController whisperController = WhisperController();
   String transcribedText = '';
@@ -319,32 +204,170 @@ class _QuestionPageState extends State<QuestionPage> {
   bool isProcessingFile = false;
   bool isListening = false;
 
+  late Future<List<bool>> checksFuture;
+  List<bool>? checks;
+  late AnimationController _animationController;
+  late Animation<double> _borderAnimation;
+
   @override
   void initState() {
-    initModel();
     super.initState();
+    initModel();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+    _borderAnimation = Tween<double>(begin: 4.0, end: 8.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void didUpdateWidget(QuizPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.showingAnswers && !oldWidget.showingAnswers) {
+      _loadChecks();
+    }
+    if (!widget.showingAnswers && oldWidget.showingAnswers) {
+      setState(() {
+        checks = null;
+        transcribedText = '';
+      });
+    }
+  }
+
+  void _loadChecks() {
+    if (widget.answerText.isEmpty) {
+      setState(() {
+        checks = List.filled(widget.answers.length, false);
+      });
+      _animationController.forward();
+    } else {
+      checksFuture = getChecks(
+        answerText: widget.answerText,
+        answers: widget.answers,
+      );
+      checksFuture.then((result) {
+        if (mounted) {
+          setState(() {
+            checks = result;
+          });
+          _animationController.forward();
+        }
+      });
+    }
+  }
+
+  bool get allAnswersCorrect => checks?.every((check) => check) ?? false;
+
+  Color get borderColor {
+    if (!widget.showingAnswers || checks == null) {
+      return Theme.of(context).colorScheme.primary;
+    }
+    return allAnswersCorrect ? Colors.green : Colors.red;
   }
 
   @override
   Widget build(BuildContext context) {
-    return QuizPageLayout(
-      inFrame: QuestionSubPage(
-        question: widget.question,
-        transcribedText: transcribedText,
-        record: record,
-        isProcessing: isProcessing,
-        isListening: isListening,
-      ),
-      belowFrame: CheckButton(
-        isVoiceFinished: transcribedText.isNotEmpty,
-        showAnswers: widget.showAnswers,
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: AnimatedBuilder(
+                  animation: _borderAnimation,
+                  builder: (context, child) {
+                    return Container(
+                      width: double.infinity,
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: borderColor,
+                          width: widget.showingAnswers && checks != null
+                              ? _borderAnimation.value
+                              : 4.0,
+                        ),
+                        borderRadius: BorderRadius.circular(50.0),
+                      ),
+                      child: child,
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(20.0),
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 20.0),
+                          child: Text(
+                            widget.question,
+                            style: theme.textTheme.titleLarge,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        Expanded(
+                          child: widget.showingAnswers
+                              ? (checks == null
+                                    ? const Center(
+                                        child: CircularProgressIndicator(),
+                                      )
+                                    : AnswersList(
+                                        answers: widget.answers,
+                                        checks: checks!,
+                                      ))
+                              : Column(
+                                  children: [
+                                    Expanded(
+                                      child: Center(
+                                        child: Text(
+                                          transcribedText,
+                                          style: theme.textTheme.bodyLarge,
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    ),
+                                    VoiceButton(
+                                      recordFunc: record,
+                                      isProcessing: isProcessing,
+                                      isListening: isListening,
+                                    ),
+                                  ],
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            ActionButton(
+              isVoiceFinished: transcribedText.isNotEmpty,
+              showingAnswers: widget.showingAnswers,
+              allAnswersCorrect: allAnswersCorrect,
+              onPressed: widget.showingAnswers
+                  ? widget.showNextQuestion
+                  : widget.toggleShowAnswers,
+              checks: checks,
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
       ),
     );
   }
 
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
   Future<void> initModel() async {
     try {
-      /// Try initializing the model from assets
       final bytesBase = await rootBundle.load(
         'assets/ggml-${model.modelName}.bin',
       );
@@ -357,7 +380,6 @@ class _QuestionPageState extends State<QuestionPage> {
         ),
       );
     } catch (e) {
-      /// On error try downloading the model
       await whisperController.downloadModel(model);
     }
   }
@@ -411,182 +433,123 @@ class _QuestionPageState extends State<QuestionPage> {
       }
     }
   }
-
-  Future<void> transcribeJfk() async {
-    final Directory tempDir = await getTemporaryDirectory();
-    final asset = await rootBundle.load('assets/jfk.wav');
-    final String jfkPath = "${tempDir.path}/jfk.wav";
-    final File convertedFile = await File(
-      jfkPath,
-    ).writeAsBytes(asset.buffer.asUint8List());
-
-    setState(() {
-      isProcessingFile = true;
-    });
-
-    final result = await whisperController.transcribe(
-      model: model,
-      audioPath: convertedFile.path,
-      lang: 'auto',
-    );
-
-    setState(() {
-      isProcessingFile = false;
-    });
-
-    if (result?.transcription.text != null) {
-      setState(() {
-        transcribedText = result!.transcription.text;
-      });
-    }
-  }
 }
 
-class QuizPageLayout extends StatelessWidget {
-  const QuizPageLayout({
-    super.key,
-    required this.inFrame,
-    required this.belowFrame,
-  });
-  final Widget inFrame;
-  final Widget belowFrame;
+class AnswersList extends StatelessWidget {
+  const AnswersList({super.key, required this.answers, required this.checks});
+
+  final List<String> answers;
+  final List<bool> checks;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Container(
-                  width: double.infinity,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: theme.colorScheme.primary,
-                      width: 4.0,
-                    ),
-                    borderRadius: BorderRadius.circular(50.0),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(20.0),
-                    child: inFrame,
-                  ),
-                ),
-              ),
+    return ListView.builder(
+      itemCount: answers.length,
+      itemBuilder: (context, index) {
+        final isCorrect = checks[index];
+        final borderColor = isCorrect ? Colors.green : Colors.red;
+        final backgroundColor = isCorrect
+            ? Colors.green.withOpacity(0.1)
+            : Colors.red.withOpacity(0.1);
+
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 4.0),
+          decoration: BoxDecoration(
+            border: Border.all(color: borderColor, width: 2.0),
+            borderRadius: BorderRadius.circular(12.0),
+          ),
+          child: CheckboxListTile(
+            title: Text(answers[index]),
+            value: checks[index],
+            onChanged: null, // Disabled
+            activeColor: isCorrect ? Colors.green : Colors.red,
+            checkColor: Colors.white,
+            tileColor: backgroundColor,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12.0),
             ),
-            SizedBox(height: 6),
-            belowFrame, // CheckButton(isVoiceFinished: transcribedText.isNotEmpty),
-            SizedBox(height: 10),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
 
-class QuestionSubPage extends StatelessWidget {
-  const QuestionSubPage({
-    super.key,
-    required this.question,
-    required this.transcribedText,
-    required this.record,
-    required this.isProcessing,
-    required this.isListening,
-  });
-  final String question;
-  final String transcribedText;
-  final Future<void> Function() record;
-  final bool isProcessing;
-  final bool isListening;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(
-          child: Center(child: Question(question: question)),
-        ),
-        Text(transcribedText),
-        VoiceButton(
-          recordFunc: record,
-          isProcessing: isProcessing,
-          isListening: isListening,
-        ),
-      ],
-    );
-  }
-}
-
-class Question extends StatelessWidget {
-  const Question({super.key, required this.question});
-  final String question;
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final style = theme.textTheme.titleLarge;
-    return Center(
-      child: Text(question, style: style, textAlign: TextAlign.center),
-    );
-  }
-}
-
-class CheckButton extends StatelessWidget {
-  const CheckButton({
+class ActionButton extends StatelessWidget {
+  const ActionButton({
     super.key,
     required this.isVoiceFinished,
-    required this.showAnswers,
+    required this.showingAnswers,
+    required this.allAnswersCorrect,
+    required this.onPressed,
+    required this.checks,
   });
+
   final bool isVoiceFinished;
-  final void Function() showAnswers;
+  final bool showingAnswers;
+  final bool allAnswersCorrect;
+  final void Function() onPressed;
+  final List<bool>? checks;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final String buttonText = isVoiceFinished ? "Check" : "Check without voice";
+
+    String buttonText;
+    Color? backgroundColor;
+    Color? textColor;
+
+    if (showingAnswers) {
+      buttonText = "Continue";
+      if (checks != null) {
+        backgroundColor = allAnswersCorrect ? Colors.green : Colors.red;
+        textColor = Colors.white;
+      }
+    } else {
+      buttonText = isVoiceFinished ? "Check" : "Check without voice";
+      textColor = isVoiceFinished ? Colors.white : Colors.grey[500];
+    }
 
     return Row(
       children: [
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12.0),
-            child: Container(
-              decoration: isVoiceFinished
-                  ? BoxDecoration(
-                      gradient: LinearGradient(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 500),
+              decoration: BoxDecoration(
+                gradient:
+                    (showingAnswers && checks != null) ||
+                        (!showingAnswers && isVoiceFinished)
+                    ? LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.green[100]!, // Very light green at top
-                          Colors.green[400]!, // Darker green at bottom
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(
-                        20,
-                      ), // Match button radius
-                    )
-                  : null,
+                        colors: showingAnswers && checks != null
+                            ? (allAnswersCorrect
+                                  ? [Colors.green[300]!, Colors.green[600]!]
+                                  : [Colors.red[300]!, Colors.red[600]!])
+                            : [Colors.green[100]!, Colors.green[400]!],
+                      )
+                    : null,
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isVoiceFinished
-                      ? Colors
-                            .transparent // Transparent to show gradient
-                      : Colors.grey[900], // Dark grey when not finished
+                  backgroundColor:
+                      (showingAnswers && checks != null) ||
+                          (!showingAnswers && isVoiceFinished)
+                      ? Colors.transparent
+                      : Colors.grey[900],
                   elevation: 0,
-                  shadowColor: Colors.transparent, // Remove shadow completely
+                  shadowColor: Colors.transparent,
                 ),
-                onPressed: () => {showAnswers()},
+                onPressed: onPressed,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16.0),
                   child: Text(
                     buttonText,
                     style: theme.textTheme.labelLarge!.copyWith(
-                      color: isVoiceFinished
-                          ? Colors
-                                .white // White text when finished
-                          : Colors.grey[500], // Light grey when not finished
+                      color: textColor,
                     ),
                   ),
                 ),
@@ -606,6 +569,7 @@ class VoiceButton extends StatelessWidget {
     required this.isProcessing,
     required this.isListening,
   });
+
   final Future<void> Function() recordFunc;
   final bool isProcessing;
   final bool isListening;
@@ -613,12 +577,7 @@ class VoiceButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final textStyle = theme.textTheme.labelLarge!.copyWith(
-      color: theme.colorScheme.secondary,
-    );
-    final buttonStyle = OutlinedButton.styleFrom(
-      backgroundColor: theme.colorScheme.inversePrimary,
-    );
+
     return GestureDetector(
       onLongPressStart: (details) async {
         await recordFunc();
@@ -636,7 +595,6 @@ class VoiceButton extends StatelessWidget {
           border: Border.all(color: theme.colorScheme.outline),
           borderRadius: BorderRadius.circular(8),
         ),
-        // child: Text("Voice", style: textStyle),
         child: isProcessing
             ? const CircularProgressIndicator()
             : Icon(
