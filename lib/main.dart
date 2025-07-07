@@ -1,30 +1,10 @@
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
-import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:flutter_sound/flutter_sound.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
-
-Future<String> fetchRealtimeToken(String apiKey) async {
-  final resp = await http.get(
-    Uri.parse(
-      'https://streaming.assemblyai.com/v3/token'
-      '?expires_in_seconds=60'
-      '&max_session_duration_seconds=300',
-    ),
-    headers: {'Authorization': apiKey},
-  );
-
-  if (resp.statusCode != 200) {
-    throw Exception('Failed to get token: ${resp.statusCode} ${resp.body}');
-  }
-
-  return jsonDecode(resp.body)['token'] as String;
-}
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:whisper_ggml/whisper_ggml.dart';
+import 'package:record/record.dart';
 
 class Quiz {
   final List<QuestionAndAnswers> questionsAndAnswers;
@@ -67,46 +47,246 @@ const List<Quiz> quizzes = [
     ],
   ),
 ];
-
-void main() async {
-  await dotenv.load(fileName: ".env");
-  await Permission.microphone.request();
+void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Knowunity Application Demo',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.deepPurple,
           brightness: Brightness.dark,
         ),
+        useMaterial3: true,
       ),
-      // home: const MyHomePage(title: 'Flutter Demo Home Page'),
-      home: QuizPage(quizzIdx: 0, questionsAndAnswersIdx: 0),
+      home: QuizPage(quiz: quizzes[0]),
     );
   }
 }
 
 class QuizPage extends StatefulWidget {
-  const QuizPage({
-    super.key,
-    required this.quizzIdx,
-    required this.questionsAndAnswersIdx,
-  });
-  final int quizzIdx;
-  final int questionsAndAnswersIdx;
+  const QuizPage({super.key, required this.quiz});
+  final Quiz quiz;
+
   @override
   State<QuizPage> createState() => _QuizPageState();
 }
 
 class _QuizPageState extends State<QuizPage> {
+  int questionsAndAnswersIdx = 0;
+  String page = "question";
+  String transcribedText = "";
+
+  void _updateTranscribedText(String newTranscribedText) {
+    setState(() {
+      transcribedText = newTranscribedText;
+    });
+  }
+
+  void _showAnswers() {
+    setState(() {
+      page = "answers";
+    });
+  }
+
+  void _showNextQuestion() {
+    setState(() {
+      if (questionsAndAnswersIdx < widget.quiz.questionsAndAnswers.length - 1) {
+        setState(() {
+          questionsAndAnswersIdx = questionsAndAnswersIdx + 1;
+          page = "question";
+        });
+      } else {
+        setState(() {
+          page = "result";
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final QuestionAndAnswers =
+        widget.quiz.questionsAndAnswers[questionsAndAnswersIdx];
+    switch (page) {
+      case "question":
+        return QuestionPage(
+          question:
+              widget.quiz.questionsAndAnswers[questionsAndAnswersIdx].question,
+          onTranscribedTextChanged: _updateTranscribedText,
+          showAnswers: _showAnswers,
+        );
+      case "answers":
+        return Placeholder();
+      case "result":
+        return Placeholder();
+      default:
+        throw ("page does not exist");
+    }
+  }
+}
+
+class QuestionPage extends StatefulWidget {
+  const QuestionPage({
+    super.key,
+    required this.question,
+    required this.onTranscribedTextChanged,
+    required this.showAnswers,
+  });
+  final String question;
+  final void Function(String) onTranscribedTextChanged;
+  final void Function() showAnswers;
+  @override
+  State<QuestionPage> createState() => _QuestionPageState();
+}
+
+class _QuestionPageState extends State<QuestionPage> {
+  final model = WhisperModel.base;
+  final AudioRecorder audioRecorder = AudioRecorder();
+  final WhisperController whisperController = WhisperController();
+  String transcribedText = '';
+  bool isProcessing = false;
+  bool isProcessingFile = false;
+  bool isListening = false;
+
+  @override
+  void initState() {
+    initModel();
+    super.initState();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return QuizPageLayout(
+      inFrame: QuestionSubPage(
+        question: widget.question,
+        transcribedText: transcribedText,
+        record: record,
+        isProcessing: isProcessing,
+        isListening: isListening,
+      ),
+      belowFrame: CheckButton(
+        isVoiceFinished: transcribedText.isNotEmpty,
+        showAnswers: widget.showAnswers,
+      ),
+    );
+  }
+
+  Future<void> initModel() async {
+    try {
+      /// Try initializing the model from assets
+      final bytesBase = await rootBundle.load(
+        'assets/ggml-${model.modelName}.bin',
+      );
+      final modelPathBase = await whisperController.getPath(model);
+      final fileBase = File(modelPathBase);
+      await fileBase.writeAsBytes(
+        bytesBase.buffer.asUint8List(
+          bytesBase.offsetInBytes,
+          bytesBase.lengthInBytes,
+        ),
+      );
+    } catch (e) {
+      /// On error try downloading the model
+      await whisperController.downloadModel(model);
+    }
+  }
+
+  Future<void> record() async {
+    if (await audioRecorder.hasPermission()) {
+      if (await audioRecorder.isRecording()) {
+        final audioPath = await audioRecorder.stop();
+
+        if (audioPath != null) {
+          debugPrint('Stopped listening.');
+
+          setState(() {
+            isListening = false;
+            isProcessing = true;
+          });
+
+          final result = await whisperController.transcribe(
+            model: model,
+            audioPath: audioPath,
+            lang: 'en',
+          );
+
+          if (mounted) {
+            setState(() {
+              isProcessing = false;
+            });
+          }
+
+          if (result?.transcription.text != null) {
+            setState(() {
+              transcribedText = result!.transcription.text;
+            });
+          }
+        } else {
+          debugPrint('No recording exists.');
+        }
+      } else {
+        debugPrint('Started listening.');
+
+        setState(() {
+          isListening = true;
+        });
+
+        final Directory appDirectory = await getTemporaryDirectory();
+        await audioRecorder.start(
+          const RecordConfig(),
+          path: '${appDirectory.path}/test.m4a',
+        );
+      }
+    }
+  }
+
+  Future<void> transcribeJfk() async {
+    final Directory tempDir = await getTemporaryDirectory();
+    final asset = await rootBundle.load('assets/jfk.wav');
+    final String jfkPath = "${tempDir.path}/jfk.wav";
+    final File convertedFile = await File(
+      jfkPath,
+    ).writeAsBytes(asset.buffer.asUint8List());
+
+    setState(() {
+      isProcessingFile = true;
+    });
+
+    final result = await whisperController.transcribe(
+      model: model,
+      audioPath: convertedFile.path,
+      lang: 'auto',
+    );
+
+    setState(() {
+      isProcessingFile = false;
+    });
+
+    if (result?.transcription.text != null) {
+      setState(() {
+        transcribedText = result!.transcription.text;
+      });
+      widget.onTranscribedTextChanged(transcribedText);
+    }
+  }
+}
+
+class QuizPageLayout extends StatelessWidget {
+  const QuizPageLayout({
+    super.key,
+    required this.inFrame,
+    required this.belowFrame,
+  });
+  final Widget inFrame;
+  final Widget belowFrame;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -129,31 +309,50 @@ class _QuizPageState extends State<QuizPage> {
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(20.0),
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: Center(
-                            child: Question(
-                              question: quizzes[widget.quizzIdx]
-                                  .questionsAndAnswers[widget
-                                      .questionsAndAnswersIdx]
-                                  .question,
-                            ),
-                          ),
-                        ),
-                        VoiceButton(),
-                      ],
-                    ),
+                    child: inFrame,
                   ),
                 ),
               ),
             ),
             SizedBox(height: 6),
-            CheckButton(isVoiceFinished: false),
+            belowFrame, // CheckButton(isVoiceFinished: transcribedText.isNotEmpty),
             SizedBox(height: 10),
           ],
         ),
       ),
+    );
+  }
+}
+
+class QuestionSubPage extends StatelessWidget {
+  const QuestionSubPage({
+    super.key,
+    required this.question,
+    required this.transcribedText,
+    required this.record,
+    required this.isProcessing,
+    required this.isListening,
+  });
+  final String question;
+  final String transcribedText;
+  final Future<void> Function() record;
+  final bool isProcessing;
+  final bool isListening;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Expanded(
+          child: Center(child: Question(question: question)),
+        ),
+        Text(transcribedText),
+        VoiceButton(
+          recordFunc: record,
+          isProcessing: isProcessing,
+          isListening: isListening,
+        ),
+      ],
     );
   }
 }
@@ -172,8 +371,13 @@ class Question extends StatelessWidget {
 }
 
 class CheckButton extends StatelessWidget {
-  const CheckButton({super.key, required this.isVoiceFinished});
+  const CheckButton({
+    super.key,
+    required this.isVoiceFinished,
+    required this.showAnswers,
+  });
   final bool isVoiceFinished;
+  final void Function() showAnswers;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -182,7 +386,7 @@ class CheckButton extends StatelessWidget {
     );
     final String buttonText = isVoiceFinished ? "Check" : "Check without voice";
     return OutlinedButton(
-      onPressed: () => {print("hello")},
+      onPressed: () => {showAnswers()},
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Text(
@@ -195,107 +399,16 @@ class CheckButton extends StatelessWidget {
   }
 }
 
-class VoiceButton extends StatefulWidget {
-  const VoiceButton({super.key});
-
-  @override
-  State<VoiceButton> createState() => _VoiceButtonState();
-}
-
-class _VoiceButtonState extends State<VoiceButton> {
-  String userTextAnswer = "";
-  FlutterSoundRecorder myRecorder = FlutterSoundRecorder();
-  late StreamController<Uint8List> recordingDataController;
-  late String apiKey;
-  late String streamToken;
-  late WebSocketChannel channel;
-
-  @override
-  void initState() {
-    super.initState();
-    apiKey = dotenv.env['ASSEMBLYAI_API_KEY'] ?? '';
-    if (apiKey.isEmpty) {
-      throw 'ASSEMBLYAI_API_KEY is not defined in .env file';
-    }
-  }
-
-  Future<void> startStreaming() async {
-    streamToken = await fetchRealtimeToken(apiKey);
-    channel = WebSocketChannel.connect(
-      Uri.parse(
-        'wss://streaming.assemblyai.com/v3/ws'
-        '?sample_rate=16000'
-        '&encoding=pcm_s16le'
-        '&format_turns=false'
-        '&token=$streamToken',
-      ),
-    );
-
-    //  buffer that we'll feed once the session is ready
-    recordingDataController = StreamController<Uint8List>.broadcast();
-
-    bool ready = false; // becomes true after we get "Begin"
-
-    // ─── outgoing audio ──────────────────────────────────────────────────
-    recordingDataController.stream.listen(
-      (pcm) {
-        if (!ready) return;
-
-        final b64 = base64.encode(pcm);
-        // print('[send] raw bytes : ${pcm.length}');
-        // print('[send] b64 bytes : ${b64.length}');
-        print(b64);
-        channel.sink.add(b64); // ← plain string, no JSON
-      },
-      onDone: () {
-        print('[send] terminating');
-        channel.sink.add(jsonEncode({'type': 'Terminate'}));
-      },
-    );
-
-    // ─── incoming events ──────────────────────────────────────────────────
-    channel.stream.listen((msg) async {
-      print('[recv] $msg');
-      final data = jsonDecode(msg as String);
-
-      switch (data['type']) {
-        case 'Begin':
-          print('▶ Session ready');
-          ready = true;
-          await _openMic(); // start mic only after Begin
-          break;
-
-        case 'Turn':
-          final text = data['transcript'] as String;
-          final endOfTurn = data['end_of_turn'] as bool;
-          print('⤷ $text   (endOfTurn=$endOfTurn)');
-          if (endOfTurn) setState(() => userTextAnswer = text);
-          break;
-
-        case 'Termination':
-          print('■ Terminated by server');
-          break;
-      }
-    });
-  }
-
-  Future<void> _openMic() async {
-    print('🎙 Opening microphone');
-    await myRecorder.openRecorder();
-    await myRecorder.startRecorder(
-      toStream: recordingDataController.sink,
-      codec: Codec.pcm16,
-      numChannels: 1,
-      sampleRate: 16000,
-    );
-  }
-
-  Future<void> stopStreaming() async {
-    print('⏹ Stopping recorder');
-    await myRecorder.stopRecorder();
-    await recordingDataController.close();
-    await channel.sink.close();
-  }
+class VoiceButton extends StatelessWidget {
+  const VoiceButton({
+    super.key,
+    required this.recordFunc,
+    required this.isProcessing,
+    required this.isListening,
+  });
+  final Future<void> Function() recordFunc;
+  final bool isProcessing;
+  final bool isListening;
 
   @override
   Widget build(BuildContext context) {
@@ -307,14 +420,14 @@ class _VoiceButtonState extends State<VoiceButton> {
       backgroundColor: theme.colorScheme.inversePrimary,
     );
     return GestureDetector(
-      onTapDown: (details) {
-        startStreaming();
+      onTapDown: (details) async {
+        await recordFunc();
       },
-      onTapUp: (details) {
-        stopStreaming();
+      onTapUp: (details) async {
+        await recordFunc();
       },
-      onTapCancel: () {
-        stopStreaming();
+      onTapCancel: () async {
+        await recordFunc();
       },
       child: Container(
         padding: const EdgeInsets.all(12.0),
@@ -323,54 +436,14 @@ class _VoiceButtonState extends State<VoiceButton> {
           border: Border.all(color: theme.colorScheme.outline),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Text("Voice: $userTextAnswer", style: textStyle),
+        // child: Text("Voice", style: textStyle),
+        child: isProcessing
+            ? const CircularProgressIndicator()
+            : Icon(
+                isListening ? Icons.mic_off : Icons.mic,
+                color: isListening ? Colors.red : null,
+              ),
       ),
     );
   }
 }
-
-/*
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-  final String title;
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      _counter++;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(widget.title),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-}
-*/
