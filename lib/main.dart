@@ -24,18 +24,13 @@ const List<Quiz> quizzes = [
   Quiz(
     questionsAndAnswers: [
       QuestionAndAnswers(
-        question: "What conditions are necessary for evolution to occur?",
+        question: "Explain Evolution",
         answers: [
-          "Heritable variation - genetic differences between individuals",
-          "Differential reproduction - some variants reproduce more successfully",
-          "Time - multiple generations for changes to accumulate",
-        ],
-      ),
-      QuestionAndAnswers(
-        question: "What is photosynthesis?",
-        answers: [
-          "Plants converting light into energy",
-          "CO2 and water (H2O) is converted into Glucose",
+          "Variation - Individuals in populations differ in their traits",
+          "Inheritance - Traits are passed from parents to offspring (heritable)",
+          "Selection pressure - Environmental factors that affect survival/reproduction",
+          "Differential reproduction - Some individuals produce more offspring than others",
+          "Population-level change - Evolution occurs in populations, not individuals",
         ],
       ),
       QuestionAndAnswers(
@@ -47,6 +42,20 @@ const List<Quiz> quizzes = [
           "spontaneous molecular changes",
         ],
       ),
+      QuestionAndAnswers(
+        question: "What is photosynthesis?",
+        answers: [
+          "Plants convert CO2 and water (H2O) into Glucose (Chemical energy) using sunlight",
+        ],
+      ),
+      /*QuestionAndAnswers(
+        question: "What conditions are necessary for evolution to occur?",
+        answers: [
+          "Heritable variation - genetic differences between individuals",
+          "Differential reproduction - some variants reproduce more successfully",
+          "Time - multiple generations for changes to accumulate",
+        ],
+      ),*/
     ],
   ),
 ];
@@ -309,7 +318,7 @@ class _QuizPageState extends State<QuizPage> {
                                     Expanded(
                                       child: Center(
                                         child: Text(
-                                          transcribedText,
+                                          "", //transcibed text
                                           style: theme.textTheme.bodyLarge,
                                           textAlign: TextAlign.center,
                                         ),
