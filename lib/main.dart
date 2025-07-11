@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:whisper_ggml/whisper_ggml.dart';
 import 'package:record/record.dart';
 import 'package:http/http.dart' as http;
 
@@ -48,14 +47,6 @@ const List<Quiz> quizzes = [
           "Plants convert CO2 and water (H2O) into Glucose (Chemical energy) using sunlight",
         ],
       ),
-      /*QuestionAndAnswers(
-        question: "What conditions are necessary for evolution to occur?",
-        answers: [
-          "Heritable variation - genetic differences between individuals",
-          "Differential reproduction - some variants reproduce more successfully",
-          "Time - multiple generations for changes to accumulate",
-        ],
-      ),*/
     ],
   ),
 ];
@@ -99,6 +90,112 @@ Future<List<bool>> getChecks({
     return checks;
   } else {
     throw Exception('Failed to post data: ${response.statusCode}');
+  }
+}
+
+Future<String> transcribeText({required String audioPath}) async {
+  await dotenv.load(fileName: ".env");
+  String geminiApiKey = dotenv.env["GEMINI_API_KEY"] ?? '';
+
+  if (geminiApiKey.isEmpty) {
+    throw Exception('GEMINI_API_KEY not found in .env file');
+  }
+
+  final file = File(audioPath);
+  final stat = await file.stat();
+  final byteSize = stat.size;
+  final mimeType = "audio/m4a";
+  final displayName = "AUDIO";
+
+  try {
+    final uploadResponse = await http.post(
+      Uri.parse(
+        "https://generativelanguage.googleapis.com/upload/v1beta/files",
+      ),
+      headers: {
+        "x-goog-api-key": geminiApiKey,
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": byteSize.toString(),
+        "X-Goog-Upload-Header-Content-Type": mimeType,
+        "Content-Type": "application/json",
+      },
+      body: json.encode({
+        "file": {"display_name": displayName},
+      }),
+    );
+
+    if (uploadResponse.statusCode != 200) {
+      throw Exception(
+        'Failed to initiate upload: ${uploadResponse.statusCode}',
+      );
+    }
+
+    final uploadUrl = uploadResponse.headers['x-goog-upload-url'];
+    if (uploadUrl == null) {
+      throw Exception('Upload URL not found in response headers');
+    }
+
+    final fileBytes = await file.readAsBytes();
+    final fileUploadResponse = await http.post(
+      Uri.parse(uploadUrl),
+      headers: {
+        "Content-Length": byteSize.toString(),
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize",
+      },
+      body: fileBytes,
+    );
+
+    if (fileUploadResponse.statusCode != 200) {
+      throw Exception(
+        'Failed to upload file: ${fileUploadResponse.statusCode}',
+      );
+    }
+
+    final fileInfo = json.decode(fileUploadResponse.body);
+    final fileUri = fileInfo['file']['uri'];
+
+    if (fileUri == null) {
+      throw Exception('File URI not found in upload response');
+    }
+
+    final transcriptionResponse = await http.post(
+      Uri.parse(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent",
+      ),
+      headers: {
+        "x-goog-api-key": geminiApiKey,
+        "Content-Type": "application/json",
+      },
+      body: json.encode({
+        "contents": [
+          {
+            "parts": [
+              {"text": "Generate a transcript of the speech."},
+              {
+                "file_data": {"mime_type": mimeType, "file_uri": fileUri},
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    if (transcriptionResponse.statusCode != 200) {
+      throw Exception(
+        'Failed to generate transcription: ${transcriptionResponse.statusCode}',
+      );
+    }
+
+    final responseData = json.decode(transcriptionResponse.body);
+
+    final transcriptionText =
+        responseData['candidates'][0]['content']['parts'][0]['text'];
+
+    return transcriptionText;
+  } catch (e) {
+    throw Exception('Failed to transcribe audio: $e');
   }
 }
 
@@ -156,9 +253,7 @@ class _QuizScreenState extends State<QuizScreen> {
         questionsAndAnswersIdx = questionsAndAnswersIdx + 1;
         showingAnswers = false;
         answerText = "";
-      } else {
-        // Navigate to result page or handle quiz completion
-      }
+      } else {}
     });
   }
 
@@ -204,9 +299,7 @@ class QuizPage extends StatefulWidget {
 }
 
 class _QuizPageState extends State<QuizPage> {
-  final model = WhisperModel.base;
   final AudioRecorder audioRecorder = AudioRecorder();
-  final WhisperController whisperController = WhisperController();
   String transcribedText = '';
   bool isProcessing = false;
   bool isProcessingFile = false;
@@ -218,7 +311,6 @@ class _QuizPageState extends State<QuizPage> {
   @override
   void initState() {
     super.initState();
-    initModel();
   }
 
   @override
@@ -360,24 +452,6 @@ class _QuizPageState extends State<QuizPage> {
     super.dispose();
   }
 
-  Future<void> initModel() async {
-    try {
-      final bytesBase = await rootBundle.load(
-        'assets/ggml-${model.modelName}.bin',
-      );
-      final modelPathBase = await whisperController.getPath(model);
-      final fileBase = File(modelPathBase);
-      await fileBase.writeAsBytes(
-        bytesBase.buffer.asUint8List(
-          bytesBase.offsetInBytes,
-          bytesBase.lengthInBytes,
-        ),
-      );
-    } catch (e) {
-      await whisperController.downloadModel(model);
-    }
-  }
-
   Future<void> record() async {
     if (await audioRecorder.hasPermission()) {
       if (await audioRecorder.isRecording()) {
@@ -390,12 +464,7 @@ class _QuizPageState extends State<QuizPage> {
             isListening = false;
             isProcessing = true;
           });
-
-          final result = await whisperController.transcribe(
-            model: model,
-            audioPath: audioPath,
-            lang: 'en',
-          );
+          final transcription = await transcribeText(audioPath: audioPath);
 
           if (mounted) {
             setState(() {
@@ -403,12 +472,10 @@ class _QuizPageState extends State<QuizPage> {
             });
           }
 
-          if (result?.transcription.text != null) {
-            setState(() {
-              transcribedText = result!.transcription.text;
-            });
-            widget.onAnswerTextChanged(transcribedText);
-          }
+          setState(() {
+            transcribedText = transcription;
+          });
+          widget.onAnswerTextChanged(transcribedText);
         } else {
           debugPrint('No recording exists.');
         }
@@ -449,8 +516,8 @@ class AnswersList extends StatelessWidget {
         final isCorrect = checks[index];
         final borderColor = isCorrect ? Colors.green : Colors.red;
         final backgroundColor = isCorrect
-            ? Colors.green.withOpacity(0.1)
-            : Colors.red.withOpacity(0.1);
+            ? Colors.green.withValues(alpha: 0.1)
+            : Colors.red.withValues(alpha: 0.1);
 
         return Container(
           margin: const EdgeInsets.symmetric(vertical: 4.0),
@@ -498,13 +565,11 @@ class ActionButton extends StatelessWidget {
     final theme = Theme.of(context);
 
     String buttonText;
-    Color? backgroundColor;
     Color? textColor;
 
     if (showingAnswers) {
       buttonText = "Continue";
       if (checks != null) {
-        backgroundColor = allAnswersCorrect ? Colors.green : Colors.red;
         textColor = Colors.white;
       }
     } else {
